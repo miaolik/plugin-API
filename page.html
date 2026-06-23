@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自定义API</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+
+.table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+}
+.modal-lg {
+    max-width: 900px;
+}
+#apiForm label {
+    font-weight: 500;
+}
+code {
+    background-color: #f8f9fa;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+#json-tree span {
+    transition: all 0.2s ease;
+}
+#json-tree span:hover {
+    transform: scale(1.05);
+}
+#selected-path-text {
+    font-family: monospace;
+    font-size: 14px;
+}
+#selected-paths-container .badge {
+    transition: all 0.2s ease;
+}
+#selected-paths-container .badge:hover {
+    background: #0d6efd !important;
+    color: white !important;
+}
+#selected-paths-container .badge:hover code {
+    color: white !important;
+}
+#variableListModal .table {
+    font-size: 0.9rem;
+}
+#variableListModal .table code {
+    background-color: #e7f3ff;
+    color: #0d6efd;
+    font-weight: 500;
+    padding: 3px 8px;
+}
+#variableListModal .table tr:hover {
+    background-color: #f8f9fa;
+}
+#variableListModal h6 {
+    border-bottom: 2px solid #dee2e6;
+    padding-bottom: 8px;
+    margin-bottom: 15px;
+}
+
+</style>
+</head>
+<body>
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>自定义API管理</h5>
+                    <button class="btn btn-primary btn-sm" onclick="showAddApiModal()">
+                        <i class="bi bi-plus-circle"></i> 添加API
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="api-list" class="table-responsive">
+                        <div class="text-center p-3">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">加载中...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 添加/编辑API模态框 -->
+<div class="modal fade" id="apiModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="apiModalLabel">添加API</h5>
+                <div>
+                    <button type="button" class="btn btn-secondary btn-sm me-2" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-info btn-sm me-2" onclick="showVariableList()">
+                        <i class="bi bi-list-ul"></i> 变量列表
+                    </button>
+                    <button type="button" class="btn btn-success btn-sm me-2" onclick="testApi()">
+                        <i class="bi bi-play-circle"></i> 测试API
+                    </button>
+                    <button type="button" class="btn btn-primary btn-sm me-2" onclick="saveApi()">
+                        <i class="bi bi-save"></i> 保存
+                    </button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <form id="apiForm">
+                    <input type="hidden" id="api-id">
+                    
+                    <!-- 基础信息 -->
+                    <div class="row mb-3">
+                        <div class="col-md-5">
+                        <label class="form-label">API名称 *</label>
+                        <input type="text" class="form-control" id="api-name" required>
+                    </div>
+                        <div class="col-md-5">
+                        <label class="form-label">触发正则 *</label>
+                            <input type="text" class="form-control" id="api-regex" placeholder="例如: 天气 (.+)" required>
+                            <small class="text-muted">自动添加 ^ 和 $</small>
+                    </div>
+                        <div class="col-md-2">
+                            <label class="form-label">启用状态</label>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" id="api-enabled" checked>
+                                <label class="form-check-label" for="api-enabled">启用</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-10">
+                        <label class="form-label">API地址 *</label>
+                        <input type="url" class="form-control" id="api-url" placeholder="https://api.example.com/data" required>
+                            <small class="text-muted">支持变量: {$1} {$2} - 正则捕获组 | {user_id} {group_id} {message} {timestamp}</small>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">响应类型</label>
+                            <select class="form-select" id="api-response-type" onchange="updateResponseConfig()">
+                                <option value="json">JSON</option>
+                                <option value="text">纯文本</option>
+                                <option value="binary">二进制</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">请求方法</label>
+                            <select class="form-select" id="api-method">
+                                <option value="GET">GET</option>
+                                <option value="POST">POST</option>
+                                <option value="PUT">PUT</option>
+                                <option value="DELETE">DELETE</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">超时时间(秒)</label>
+                            <input type="number" class="form-control" id="api-timeout" value="10" min="1" max="60">
+                        </div>
+                    </div>
+                    
+                    <!-- 高级设置（可折叠） -->
+                    <div class="mb-3">
+                        <a class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" href="#advancedSettings" role="button" aria-expanded="false" aria-controls="advancedSettings">
+                            <i class="bi bi-gear"></i> 高级设置
+                        </a>
+                        <div class="collapse mt-2" id="advancedSettings">
+                            <div class="card card-body">
+                    <div class="mb-3">
+                        <label class="form-label">请求头 (JSON格式)</label>
+                                    <textarea class="form-control" id="api-headers" rows="5" placeholder='{"User-Agent": "Mozilla/5.0 ...", "Accept": "application/json"}'></textarea>
+                                    <small class="text-muted">
+                                        <a href="javascript:void(0)" onclick="fillDefaultHeaders()">填充常见请求头</a>
+                                    </small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">URL参数 (JSON格式)</label>
+                        <textarea class="form-control" id="api-params" rows="2" placeholder='{"key": "value"}'></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">请求体 (JSON格式，仅POST/PUT)</label>
+                        <textarea class="form-control" id="api-body" rows="2" placeholder='{"data": "{message}"}'></textarea>
+                    </div>
+                        </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3" id="message-template-group">
+                        <label class="form-label">消息模板</label>
+                        <textarea class="form-control" id="api-message-template" rows="4" placeholder="机器人发送的内容，变量请点击变量列表查看"></textarea>
+                        <small class="text-muted">点击上方"变量列表"按钮查看所有可用变量</small>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                        <label class="form-label">回复类型</label>
+                        <select class="form-select" id="api-reply-type" onchange="updateReplyConfig()">
+                            <option value="text">普通文本</option>
+                            <option value="markdown">原生Markdown</option>
+                            <option value="template_markdown">模板Markdown</option>
+                            <option value="image">图片</option>
+                            <option value="voice">语音</option>
+                            <option value="video">视频</option>
+                            <option value="ark">ARK卡片</option>
+                        </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">权限设置</label>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="api-owner-only">
+                                <label class="form-check-label" for="api-owner-only">仅主人</label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">&nbsp;</label>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="api-group-only">
+                                <label class="form-check-label" for="api-group-only">仅群聊</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 图片配置 -->
+                    <div id="image-config" style="display:none;">
+                        <div class="alert alert-info small" id="image-config-hint">
+                            <i class="bi bi-info-circle"></i> 图片URL将从消息模板中提取。消息模板的处理结果将作为图片URL使用。
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">图片描述文本 (可选)</label>
+                            <input type="text" class="form-control" id="api-image-text" placeholder="图片描述，支持变量 {$1} {data.xxx} {user_id} 等">
+                        </div>
+                    </div>
+                    
+                    <!-- 语音配置 -->
+                    <div id="voice-config" style="display:none;">
+                        <div class="alert alert-info small" id="voice-config-hint">
+                            <i class="bi bi-info-circle"></i> 语音URL将从消息模板中提取。消息模板的处理结果将作为语音URL使用。
+                        </div>
+                    </div>
+                    
+                    <!-- 视频配置 -->
+                    <div id="video-config" style="display:none;">
+                        <div class="alert alert-info small" id="video-config-hint">
+                            <i class="bi bi-info-circle"></i> 视频URL将从消息模板中提取。消息模板的处理结果将作为视频URL使用。
+                        </div>
+                    </div>
+                    
+                    <!-- 模板Markdown配置 -->
+                    <div id="template-config" style="display:none;">
+                        <div class="alert alert-info small">
+                            <i class="bi bi-info-circle"></i> 模板参数从消息模板中提取，逗号分隔。
+                            <br><strong>示例：</strong>
+                            <br>• JSON响应: <code>{data.title},{data.content},{data.author}</code>
+                            <br>• 纯文本响应: <code>{data},{$1},{user_id}</code>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">模板ID</label>
+                            <input type="text" class="form-control" id="api-markdown-template" placeholder="1">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">按钮ID (可选)</label>
+                            <input type="text" class="form-control" id="api-keyboard-id" placeholder="102321943_1752737844">
+                        </div>
+                    </div>
+                    
+                    <!-- ARK配置 -->
+                    <div id="ark-config" style="display:none;">
+                        <div class="alert alert-info small">
+                            <i class="bi bi-info-circle"></i> ARK参数从消息模板中提取，逗号分隔，括号表示列表项。
+                            <br><strong>ARK23示例（列表卡片）：</strong>
+                            <br>• <code>描述,提示,(功能1),(功能2),(功能3,https://link.com)</code>
+                            <br>• JSON: <code>{data.desc},{data.prompt},({data.item1}),({data.item2},{data.link2})</code>
+                            <br><strong>ARK24示例（信息卡片）：</strong>
+                            <br>• <code>描述,提示,标题,元描述,图片URL,链接,子标题</code>
+                            <br><strong>ARK37示例（通知卡片）：</strong>
+                            <br>• <code>提示,标题,子标题,封面URL,链接</code>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">ARK类型</label>
+                            <select class="form-select" id="api-ark-type">
+                                <option value="23">列表卡片 (23)</option>
+                                <option value="24">信息卡片 (24)</option>
+                                <option value="37">通知卡片 (37)</option>
+                            </select>
+                        </div>
+                        </div>
+                </form>
+                    </div>
+                            </div>
+                        </div>
+                            </div>
+
+<!-- 测试结果模态框 -->
+<div class="modal fade" id="testResultModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">API测试结果</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+            <div class="modal-body">
+                <div id="test-result-content"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 变量列表模态框 -->
+<div class="modal fade" id="variableListModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-code-square me-2"></i>可用变量列表</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="text-primary"><i class="bi bi-braces"></i> JSON数据变量</h6>
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>变量</th>
+                                    <th>说明</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>{data.xxx}</code></td>
+                                    <td>JSON路径，如 {data.title}</td>
+                                </tr>
+                                <tr>
+                                    <td><code>{data}</code></td>
+                                    <td>纯文本响应的完整内容</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2" class="text-muted small">
+                                        💡 点击"测试API"可视化选择JSON路径
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        
+                        <h6 class="text-success mt-4"><i class="bi bi-regex"></i> 正则捕获组</h6>
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>变量</th>
+                                    <th>说明</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>{$1}</code></td>
+                                    <td>第1个捕获组</td>
+                                </tr>
+                                <tr>
+                                    <td><code>{$2}</code></td>
+                                    <td>第2个捕获组</td>
+                                </tr>
+                                <tr>
+                                    <td><code>{$3}</code></td>
+                                    <td>第3个捕获组...</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2" class="text-muted small">
+                                        💡 示例：正则 <code>天气 (.+)</code> 捕获城市名，用 {$1} 引用
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <h6 class="text-warning"><i class="bi bi-person"></i> 用户/环境变量</h6>
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>变量</th>
+                                    <th>说明</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>{user_id}</code></td>
+                                    <td>用户ID</td>
+                                </tr>
+                                <tr>
+                                    <td><code>{group_id}</code></td>
+                                    <td>群组ID</td>
+                                </tr>
+                                <tr>
+                                    <td><code>{message}</code></td>
+                                    <td>用户发送的原始消息</td>
+                                </tr>
+                                <tr>
+                                    <td><code>{timestamp}</code></td>
+                                    <td>Unix时间戳</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        
+                        <h6 class="text-danger mt-4"><i class="bi bi-info-circle"></i> 使用说明</h6>
+                        <div class="alert alert-light small mb-0">
+                            <p class="mb-2"><strong>📍 适用位置：</strong></p>
+                            <ul class="mb-2">
+                                <li>API地址</li>
+                                <li>URL参数、请求体</li>
+                                <li>消息模板</li>
+                                <li>图片描述</li>
+                            </ul>
+                            <p class="mb-2"><strong>📋 格式说明：</strong></p>
+                            <ul class="mb-0">
+                                <li><strong>普通文本/Markdown：</strong>换行分隔</li>
+                                <li><strong>模板Markdown/ARK：</strong>逗号分隔</li>
+                                <li><strong>ARK数组：</strong>用括号，如 (项1,链接1)</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+
+let apiModal;
+let testResultModal;
+let variableListModal;
+let currentEditingId = null;
+
+// 延迟初始化，确保DOM已完全加载
+setTimeout(function() {
+    const apiModalEl = document.getElementById('apiModal');
+    const testModalEl = document.getElementById('testResultModal');
+    const variableModalEl = document.getElementById('variableListModal');
+    if (apiModalEl) {
+        apiModal = new bootstrap.Modal(apiModalEl);
+    }
+    if (testModalEl) {
+        testResultModal = new bootstrap.Modal(testModalEl);
+    }
+    if (variableModalEl) {
+        variableListModal = new bootstrap.Modal(variableModalEl);
+    }
+    loadApiList();
+}, 100);
+
+function showVariableList() {
+    if (!variableListModal) {
+        const variableModalEl = document.getElementById('variableListModal');
+        if (variableModalEl) {
+            variableListModal = new bootstrap.Modal(variableModalEl);
+        }
+    }
+    if (variableListModal) {
+        variableListModal.show();
+    }
+}
+
+function loadApiList() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    
+    fetch(`/api/ext/custom_api/list?token=${encodeURIComponent(token)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                renderApiList(data.data.apis);
+            } else {
+                showError('加载失败: ' + data.message);
+            }
+        })
+        .catch(error => {
+            showError('网络错误: ' + error.message);
+        });
+}
+
+function renderApiList(apis) {
+    const listDiv = document.getElementById('api-list');
+    
+    if (!apis || apis.length === 0) {
+        listDiv.innerHTML = '<div class="text-center text-muted p-3">暂无API配置</div>';
+        return;
+    }
+    
+    let html = '<table class="table table-hover">';
+    html += '<thead><tr>';
+    html += '<th style="width: 5%;">状态</th>';
+    html += '<th style="width: 10%;">名称</th>';
+    html += '<th style="width: 15%;">正则</th>';
+    html += '<th style="width: 35%;">URL</th>';
+    html += '<th style="width: 10%;">回复类型</th>';
+    html += '<th style="width: 10%;">权限</th>';
+    html += '<th style="width: 15%;">操作</th>';
+    html += '</tr></thead><tbody>';
+    
+    apis.forEach(api => {
+        const statusBadge = api.enabled 
+            ? '<span class="badge bg-success">启用</span>' 
+            : '<span class="badge bg-secondary">禁用</span>';
+        
+        const permissions = [];
+        if (api.owner_only) permissions.push('主人');
+        if (api.group_only) permissions.push('群聊');
+        const permText = permissions.length > 0 ? permissions.join(', ') : '无限制';
+        
+        html += `<tr>
+            <td>${statusBadge}</td>
+            <td><strong>${api.name}</strong></td>
+            <td><code style="font-size: 0.85em;">${api.regex}</code></td>
+            <td><small class="text-muted">${api.url.substring(0, 60)}${api.url.length > 60 ? '...' : ''}</small></td>
+            <td>${api.reply_type}</td>
+            <td><small>${permText}</small></td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="editApi('${api.id}')" title="编辑">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-${api.enabled ? 'warning' : 'success'}" 
+                        onclick="toggleApi('${api.id}')" title="${api.enabled ? '禁用' : '启用'}">
+                    <i class="bi bi-${api.enabled ? 'pause' : 'play'}-circle"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteApi('${api.id}')" title="删除">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    listDiv.innerHTML = html;
+}
+
+function showAddApiModal() {
+    currentEditingId = null;
+    document.getElementById('apiModalLabel').textContent = '添加API';
+    document.getElementById('apiForm').reset();
+    document.getElementById('api-id').value = '';
+    document.getElementById('api-enabled').checked = true;
+    
+    // 设置默认值
+    document.getElementById('api-response-type').value = 'json';  // 默认JSON
+    document.getElementById('api-reply-type').value = 'text';     // 默认普通文本
+    
+    // 默认填充常见请求头（适用于各种资源类型）
+    const defaultHeaders = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
+        "Upgrade-Insecure-Requests": "1"
+    };
+    document.getElementById('api-headers').value = JSON.stringify(defaultHeaders, null, 2);
+    
+    updateResponseConfig();
+    updateReplyConfig();
+    
+    // 确保高级设置是折叠的
+    const advancedSettingsEl = document.getElementById('advancedSettings');
+    if (advancedSettingsEl && advancedSettingsEl.classList.contains('show')) {
+        const bsCollapse = bootstrap.Collapse.getInstance(advancedSettingsEl);
+        if (bsCollapse) {
+            bsCollapse.hide();
+        }
+    }
+    
+    // 确保Modal已初始化
+    if (!apiModal) {
+        const apiModalEl = document.getElementById('apiModal');
+        if (apiModalEl) {
+            apiModal = new bootstrap.Modal(apiModalEl);
+        }
+    }
+    if (apiModal) {
+        apiModal.show();
+    }
+}
+
+function editApi(apiId) {
+    currentEditingId = apiId;
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    
+    fetch(`/api/ext/custom_api/get?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({api_id: apiId})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const api = data.data.api;
+            document.getElementById('apiModalLabel').textContent = '编辑API';
+            document.getElementById('api-id').value = api.id;
+            document.getElementById('api-name').value = api.name;
+            
+            // 显示时去掉^和$
+            let displayRegex = api.regex;
+            if (displayRegex.startsWith('^')) {
+                displayRegex = displayRegex.substring(1);
+            }
+            if (displayRegex.endsWith('$')) {
+                displayRegex = displayRegex.substring(0, displayRegex.length - 1);
+            }
+            document.getElementById('api-regex').value = displayRegex;
+            
+            document.getElementById('api-enabled').checked = api.enabled;
+            document.getElementById('api-url').value = api.url;
+            document.getElementById('api-method').value = api.method;
+            document.getElementById('api-timeout').value = api.timeout;
+            document.getElementById('api-headers').value = JSON.stringify(api.headers || {}, null, 2);
+            document.getElementById('api-params').value = JSON.stringify(api.params || {}, null, 2);
+            document.getElementById('api-body').value = JSON.stringify(api.body || {}, null, 2);
+            document.getElementById('api-response-type').value = api.response_type;
+            document.getElementById('api-message-template').value = api.message_template || '';
+            document.getElementById('api-reply-type').value = api.reply_type;
+            document.getElementById('api-image-text').value = api.image_text || '';
+            document.getElementById('api-markdown-template').value = api.markdown_template || '1';
+            document.getElementById('api-keyboard-id').value = api.keyboard_id || '';
+            document.getElementById('api-ark-type').value = api.ark_type || '23';
+            document.getElementById('api-owner-only').checked = api.owner_only || false;
+            document.getElementById('api-group-only').checked = api.group_only || false;
+            
+            // 如果有高级设置内容，自动展开
+            const hasAdvancedSettings = (api.headers && Object.keys(api.headers).length > 0) ||
+                                       (api.params && Object.keys(api.params).length > 0) ||
+                                       (api.body && Object.keys(api.body).length > 0);
+            if (hasAdvancedSettings) {
+                const advancedSettingsEl = document.getElementById('advancedSettings');
+                if (advancedSettingsEl) {
+                    const bsCollapse = new bootstrap.Collapse(advancedSettingsEl, {show: true});
+                }
+            }
+            
+            updateResponseConfig();
+            updateReplyConfig();
+            
+            // 确保Modal已初始化
+            if (!apiModal) {
+                const apiModalEl = document.getElementById('apiModal');
+                if (apiModalEl) {
+                    apiModal = new bootstrap.Modal(apiModalEl);
+                }
+            }
+            if (apiModal) {
+                apiModal.show();
+            }
+        } else {
+            showError('获取API信息失败: ' + data.message);
+        }
+    })
+    .catch(error => {
+        showError('网络错误: ' + error.message);
+    });
+}
+
+function saveApi() {
+    const apiId = document.getElementById('api-id').value || generateId();
+    
+    // 验证JSON格式
+    try {
+        const headers = document.getElementById('api-headers').value.trim();
+        const params = document.getElementById('api-params').value.trim();
+        const body = document.getElementById('api-body').value.trim();
+        
+        if (headers && headers !== '{}') JSON.parse(headers);
+        if (params && params !== '{}') JSON.parse(params);
+        if (body && body !== '{}') JSON.parse(body);
+    } catch (e) {
+        showError('JSON格式错误: ' + e.message);
+        return;
+    }
+    
+    // 自动为正则添加^和$
+    let regex = document.getElementById('api-regex').value.trim();
+    if (!regex.startsWith('^')) {
+        regex = '^' + regex;
+    }
+    if (!regex.endsWith('$')) {
+        regex = regex + '$';
+    }
+    
+    const apiData = {
+        id: apiId,
+        name: document.getElementById('api-name').value,
+        regex: regex,
+        enabled: document.getElementById('api-enabled').checked,
+        url: document.getElementById('api-url').value,
+        method: document.getElementById('api-method').value,
+        timeout: parseInt(document.getElementById('api-timeout').value),
+        headers: JSON.parse(document.getElementById('api-headers').value.trim() || '{}'),
+        params: JSON.parse(document.getElementById('api-params').value.trim() || '{}'),
+        body: JSON.parse(document.getElementById('api-body').value.trim() || '{}'),
+        response_type: document.getElementById('api-response-type').value,
+        message_template: document.getElementById('api-message-template').value,
+        reply_type: document.getElementById('api-reply-type').value,
+        image_text: document.getElementById('api-image-text').value,
+        markdown_template: document.getElementById('api-markdown-template').value,
+        keyboard_id: document.getElementById('api-keyboard-id').value,
+        ark_type: document.getElementById('api-ark-type').value,
+        owner_only: document.getElementById('api-owner-only').checked,
+        group_only: document.getElementById('api-group-only').checked
+    };
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    
+    fetch(`/api/ext/custom_api/save?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(apiData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccess('保存成功');
+            if (apiModal) {
+                apiModal.hide();
+            }
+            loadApiList();
+        } else {
+            showError('保存失败: ' + data.message);
+        }
+    })
+    .catch(error => {
+        showError('网络错误: ' + error.message);
+    });
+}
+
+function deleteApi(apiId) {
+    if (!confirm('确定要删除这个API吗？')) return;
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    
+    fetch(`/api/ext/custom_api/delete?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({api_id: apiId})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccess('删除成功');
+            loadApiList();
+        } else {
+            showError('删除失败: ' + data.message);
+        }
+    })
+    .catch(error => {
+        showError('网络错误: ' + error.message);
+    });
+}
+
+function toggleApi(apiId) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    
+    fetch(`/api/ext/custom_api/toggle?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({api_id: apiId})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccess('操作成功');
+            loadApiList();
+        } else {
+            showError('操作失败: ' + data.message);
+        }
+    })
+    .catch(error => {
+        showError('网络错误: ' + error.message);
+    });
+}
+
+function testApi() {
+    // 清空已选择的路径
+    selectedJsonPaths = [];
+    
+    const apiData = {
+        url: document.getElementById('api-url').value,
+        method: document.getElementById('api-method').value,
+        timeout: parseInt(document.getElementById('api-timeout').value),
+        headers: JSON.parse(document.getElementById('api-headers').value.trim() || '{}'),
+        params: JSON.parse(document.getElementById('api-params').value.trim() || '{}'),
+        body: JSON.parse(document.getElementById('api-body').value.trim() || '{}'),
+        response_type: document.getElementById('api-response-type').value,
+        message_template: document.getElementById('api-message-template').value
+    };
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    
+    document.getElementById('test-result-content').innerHTML = '<div class="text-center"><div class="spinner-border"></div><p class="mt-2">测试中...</p></div>';
+    
+    // 确保Modal已初始化
+    if (!testResultModal) {
+        const testModalEl = document.getElementById('testResultModal');
+        if (testModalEl) {
+            testResultModal = new bootstrap.Modal(testModalEl);
+        }
+    }
+    if (testResultModal) {
+        testResultModal.show();
+    }
+    
+    fetch(`/api/ext/custom_api/test?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(apiData)
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers.get('content-type'));
+        
+        if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status} ${response.statusText}`);
+        }
+        
+        return response.text().then(text => {
+            console.log('Response text:', text);
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                console.error('JSON解析错误:', e);
+                console.error('响应内容:', text);
+                throw new Error(`JSON解析失败: ${text.substring(0, 100)}`);
+            }
+        });
+    })
+    .then(data => {
+        console.log('Parsed data:', data);
+        if (data.success) {
+            const result = data.data;
+            const responseType = document.getElementById('api-response-type').value;
+            
+            console.log('Response Type:', responseType);
+            console.log('Result:', result);
+            console.log('Result Type:', typeof result);
+            console.log('Is Object:', typeof result === 'object');
+            console.log('Is Null:', result === null);
+            
+            let html = '<div class="alert alert-success">测试成功</div>';
+            
+            // 如果是JSON类型，显示可点击的树形结构
+            if (responseType === 'json' && result !== null && typeof result === 'object') {
+                html += '<div class="mb-3">';
+                html += '<h6>选择JSON路径 (可选择多个):</h6>';
+                html += '<div class="alert alert-info small mb-2">';
+                html += '<i class="bi bi-info-circle"></i> 点击下方JSON数据中的任意值，可选择多个路径';
+                html += '</div>';
+                html += '<div class="mb-3">';
+                html += '<strong>已选择的路径：</strong>';
+                html += '<div id="selected-paths-container" class="mt-2" style="min-height: 40px; padding: 8px; background: #f8f9fa; border-radius: 4px;">';
+                html += '<span class="text-muted">点击下方数据值来添加路径</span>';
+                html += '</div>';
+                html += '<button class="btn btn-sm btn-primary mt-2 me-2" onclick="applySelectedPaths()">';
+                html += '<i class="bi bi-check-circle"></i> 应用到消息模板';
+                html += '</button>';
+                html += '<button class="btn btn-sm btn-secondary mt-2" onclick="clearSelectedPaths()">';
+                html += '<i class="bi bi-trash"></i> 清空';
+                html += '</button>';
+                html += '</div>';
+                html += '<div class="bg-light p-3 rounded" style="max-height: 400px; overflow-y: auto;">';
+                html += '<pre id="json-tree" style="margin: 0; font-family: monospace;"></pre>';
+                html += '</div>';
+                html += '</div>';
+                
+                // 渲染JSON树
+                document.getElementById('test-result-content').innerHTML = html;
+                const treeContainer = document.getElementById('json-tree');
+                console.log('Tree Container:', treeContainer);
+                if (treeContainer) {
+                    renderJsonTree(result, '', treeContainer);
+                    console.log('JSON Tree rendered');
+                } else {
+                    console.error('Tree container not found!');
+                }
+            } else {
+                // 检查是否是二进制数据
+                if (result && typeof result === 'object' && result.type === 'binary') {
+                    html += '<h6>二进制数据预览:</h6>';
+                    html += '<div class="alert alert-info small mb-2">';
+                    html += `<i class="bi bi-info-circle"></i> 文件大小: ${result.size} 字节 | 类型: ${result.mime_type}`;
+                    html += '</div>';
+                    
+                    // 加载base64数据
+                    loadTempFileAndDisplay(result.filename, result.mime_type);
+                } else {
+                    // 非JSON或非对象类型，显示普通文本
+            html += '<h6>响应数据:</h6>';
+                    if (responseType === 'json' && typeof result !== 'object') {
+                        html += '<div class="alert alert-warning small mb-2">';
+                        html += '<i class="bi bi-info-circle"></i> API返回的是简单值（字符串/数字），<strong>JSON路径留空</strong>即可直接获取该值';
+                        html += '</div>';
+                    }
+            html += '<pre class="bg-light p-3" style="max-height: 400px; overflow-y: auto;">' + 
+                            JSON.stringify(result, null, 2) + '</pre>';
+            document.getElementById('test-result-content').innerHTML = html;
+                }
+            }
+        } else {
+            document.getElementById('test-result-content').innerHTML = 
+                '<div class="alert alert-danger">测试失败: ' + data.message + '</div>';
+        }
+    })
+    .catch(error => {
+        console.error('测试API错误:', error);
+        document.getElementById('test-result-content').innerHTML = 
+            '<div class="alert alert-danger"><strong>错误:</strong> ' + error.message + '</div>';
+    });
+}
+
+let selectedJsonPaths = [];
+
+function loadTempFileAndDisplay(filename, mimeType) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    
+    fetch(`/api/ext/custom_api/temp?filename=${filename}&token=${token}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const base64Data = data.data.base64;
+                const dataUrl = `data:${data.data.mime_type};base64,${base64Data}`;
+                
+                let mediaHtml = '';
+                if (mimeType.startsWith('image/')) {
+                    mediaHtml = `<div class="text-center p-3 border rounded">
+                        <img src="${dataUrl}" style="max-width: 100%; max-height: 500px;" />
+                    </div>`;
+                } else if (mimeType.startsWith('video/')) {
+                    mediaHtml = `<div class="text-center p-3 border rounded">
+                        <video controls style="max-width: 100%; max-height: 500px;">
+                            <source src="${dataUrl}" type="${mimeType}">
+                        </video>
+                    </div>`;
+                } else if (mimeType.startsWith('audio/')) {
+                    mediaHtml = `<div class="p-3 border rounded">
+                        <audio controls style="width: 100%;">
+                            <source src="${dataUrl}" type="${mimeType}">
+                        </audio>
+                    </div>`;
+                } else {
+                    mediaHtml = '<div class="p-3 border rounded"><p class="text-muted">无法预览此类型的文件</p></div>';
+                }
+                
+                const existingContent = document.getElementById('test-result-content').innerHTML;
+                document.getElementById('test-result-content').innerHTML = existingContent + mediaHtml;
+            } else {
+                console.error('加载临时文件失败:', data.message);
+            }
+        })
+        .catch(error => {
+            console.error('加载临时文件错误:', error);
+        });
+}
+
+function renderJsonTree(obj, path, container, indent = 0) {
+    const indentStr = '  '.repeat(indent);
+    
+    if (obj === null) {
+        const span = document.createElement('span');
+        span.textContent = 'null';
+        span.style.color = '#999';
+        span.style.cursor = 'pointer';
+        span.style.padding = '2px 4px';
+        span.style.borderRadius = '3px';
+        span.onclick = (e) => {
+            e.stopPropagation();
+            selectJsonPath(path);
+        };
+        span.onmouseenter = (e) => {
+            e.target.style.backgroundColor = '#e0f7fa';
+            e.target.style.fontWeight = 'bold';
+        };
+        span.onmouseleave = (e) => {
+            e.target.style.backgroundColor = '';
+            e.target.style.fontWeight = 'normal';
+        };
+        container.appendChild(span);
+    } else if (typeof obj === 'object') {
+        if (Array.isArray(obj)) {
+            container.appendChild(document.createTextNode('[' + String.fromCharCode(10)));
+            obj.forEach((item, index) => {
+                const itemPath = path ? `${path}[${index}]` : `[${index}]`;
+                const line = document.createElement('span');
+                line.textContent = indentStr + '  ';
+                container.appendChild(line);
+                renderJsonTree(item, itemPath, container, indent + 1);
+                if (index < obj.length - 1) {
+                    container.appendChild(document.createTextNode(','));
+                }
+                container.appendChild(document.createTextNode(String.fromCharCode(10)));
+            });
+            container.appendChild(document.createTextNode(indentStr + ']'));
+        } else {
+            container.appendChild(document.createTextNode('{' + String.fromCharCode(10)));
+            const keys = Object.keys(obj);
+            keys.forEach((key, index) => {
+                const keyPath = path ? `${path}.${key}` : key;
+                const line = document.createElement('span');
+                line.textContent = indentStr + '  ';
+                container.appendChild(line);
+                
+                const keySpan = document.createElement('span');
+                keySpan.textContent = JSON.stringify(key);
+                keySpan.style.color = '#0066cc';
+                container.appendChild(keySpan);
+                
+                container.appendChild(document.createTextNode(': '));
+                renderJsonTree(obj[key], keyPath, container, indent + 1);
+                if (index < keys.length - 1) {
+                    container.appendChild(document.createTextNode(','));
+                }
+                container.appendChild(document.createTextNode(String.fromCharCode(10)));
+            });
+            container.appendChild(document.createTextNode(indentStr + '}'));
+        }
+    } else if (typeof obj === 'string') {
+        const span = document.createElement('span');
+        span.textContent = JSON.stringify(obj);
+        span.style.color = '#008800';
+        span.style.cursor = 'pointer';
+        span.style.padding = '2px 4px';
+        span.style.borderRadius = '3px';
+        span.onclick = (e) => {
+            e.stopPropagation();
+            selectJsonPath(path);
+        };
+        span.onmouseenter = (e) => {
+            e.target.style.backgroundColor = '#e0f7fa';
+            e.target.style.fontWeight = 'bold';
+        };
+        span.onmouseleave = (e) => {
+            e.target.style.backgroundColor = '';
+            e.target.style.fontWeight = 'normal';
+        };
+        container.appendChild(span);
+    } else if (typeof obj === 'number') {
+        const span = document.createElement('span');
+        span.textContent = obj;
+        span.style.color = '#dd0000';
+        span.style.cursor = 'pointer';
+        span.style.padding = '2px 4px';
+        span.style.borderRadius = '3px';
+        span.onclick = (e) => {
+            e.stopPropagation();
+            selectJsonPath(path);
+        };
+        span.onmouseenter = (e) => {
+            e.target.style.backgroundColor = '#e0f7fa';
+            e.target.style.fontWeight = 'bold';
+        };
+        span.onmouseleave = (e) => {
+            e.target.style.backgroundColor = '';
+            e.target.style.fontWeight = 'normal';
+        };
+        container.appendChild(span);
+    } else if (typeof obj === 'boolean') {
+        const span = document.createElement('span');
+        span.textContent = obj;
+        span.style.color = '#0000dd';
+        span.style.cursor = 'pointer';
+        span.style.padding = '2px 4px';
+        span.style.borderRadius = '3px';
+        span.onclick = (e) => {
+            e.stopPropagation();
+            selectJsonPath(path);
+        };
+        span.onmouseenter = (e) => {
+            e.target.style.backgroundColor = '#e0f7fa';
+            e.target.style.fontWeight = 'bold';
+        };
+        span.onmouseleave = (e) => {
+            e.target.style.backgroundColor = '';
+            e.target.style.fontWeight = 'normal';
+        };
+        container.appendChild(span);
+    }
+}
+
+function selectJsonPath(path) {
+    if (!path) return;
+    
+    // 避免重复添加
+    if (selectedJsonPaths.includes(path)) {
+        showError('路径已存在');
+        return;
+    }
+    
+    selectedJsonPaths.push(path);
+    renderSelectedPaths();
+}
+
+function renderSelectedPaths() {
+    const container = document.getElementById('selected-paths-container');
+    if (!container) return;
+    
+    if (selectedJsonPaths.length === 0) {
+        container.innerHTML = '<span class="text-muted">点击下方数据值来添加路径</span>';
+        return;
+    }
+    
+    let html = '';
+    selectedJsonPaths.forEach((path, index) => {
+        html += `<span class="badge me-2 mb-2" style="font-size: 13px; padding: 6px 10px; background: transparent; border: 1px solid #0d6efd; color: #0d6efd;">
+            <code style="color: #0d6efd; background: transparent;">{${path}}</code>
+            <i class="bi bi-x-circle ms-2" onclick="removeSelectedPath(${index})" style="cursor: pointer;"></i>
+        </span>`;
+    });
+    container.innerHTML = html;
+}
+
+function removeSelectedPath(index) {
+    selectedJsonPaths.splice(index, 1);
+    renderSelectedPaths();
+}
+
+function clearSelectedPaths() {
+    selectedJsonPaths = [];
+    renderSelectedPaths();
+}
+
+function applySelectedPaths() {
+    if (selectedJsonPaths.length === 0) {
+        showError('请先选择至少一个路径');
+        return;
+    }
+    
+    // 构造消息模板：每行一个路径
+    const template = selectedJsonPaths.map(path => `{${path}}`).join(String.fromCharCode(10));
+    document.getElementById('api-message-template').value = template;
+    
+    // 关闭测试结果模态框
+    if (testResultModal) {
+        testResultModal.hide();
+    }
+    
+    // 显示成功提示
+    showSuccess(`已应用 ${selectedJsonPaths.length} 个路径到消息模板`);
+    
+    // 清空选择
+    selectedJsonPaths = [];
+}
+
+function updateResponseConfig() {
+    const responseType = document.getElementById('api-response-type').value;
+    const messageTemplateGroup = document.getElementById('message-template-group');
+    const replyTypeSelect = document.getElementById('api-reply-type');
+    
+    if (messageTemplateGroup) {
+        if (responseType === 'json' || responseType === 'text') {
+            messageTemplateGroup.style.display = 'block';
+    } else {
+            messageTemplateGroup.style.display = 'none';
+        }
+    }
+    
+    // 如果是二进制响应，限制回复类型选项
+    if (replyTypeSelect) {
+        const options = replyTypeSelect.options;
+        for (let i = 0; i < options.length; i++) {
+            const option = options[i];
+            // 二进制响应只能选择图片/语音/视频
+            if (responseType === 'binary') {
+                option.disabled = !['image', 'voice', 'video'].includes(option.value);
+            } else {
+                option.disabled = false;
+            }
+        }
+        
+        // 如果当前选择的类型被禁用，自动切换
+        if (replyTypeSelect.options[replyTypeSelect.selectedIndex].disabled) {
+            replyTypeSelect.value = responseType === 'binary' ? 'image' : 'text';
+        }
+    }
+    
+    // 更新回复配置
+    updateReplyConfig();
+}
+
+function updateReplyConfig() {
+    const replyType = document.getElementById('api-reply-type').value;
+    const responseType = document.getElementById('api-response-type').value;
+    
+    document.getElementById('image-config').style.display = 'none';
+    document.getElementById('voice-config').style.display = 'none';
+    document.getElementById('video-config').style.display = 'none';
+    document.getElementById('template-config').style.display = 'none';
+    document.getElementById('ark-config').style.display = 'none';
+    
+    if (replyType === 'image') {
+        document.getElementById('image-config').style.display = 'block';
+        // 如果响应类型是二进制，隐藏提示
+        const hint = document.getElementById('image-config-hint');
+        if (hint) {
+            hint.style.display = responseType === 'binary' ? 'none' : 'block';
+        }
+    } else if (replyType === 'voice') {
+        document.getElementById('voice-config').style.display = 'block';
+        const hint = document.getElementById('voice-config-hint');
+        if (hint) {
+            hint.style.display = responseType === 'binary' ? 'none' : 'block';
+        }
+    } else if (replyType === 'video') {
+        document.getElementById('video-config').style.display = 'block';
+        const hint = document.getElementById('video-config-hint');
+        if (hint) {
+            hint.style.display = responseType === 'binary' ? 'none' : 'block';
+        }
+    } else if (replyType === 'template_markdown') {
+        document.getElementById('template-config').style.display = 'block';
+    } else if (replyType === 'ark') {
+        document.getElementById('ark-config').style.display = 'block';
+    }
+}
+
+function generateId() {
+    return 'api_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+}
+
+function showSuccess(message) {
+    // 使用Bootstrap的Toast或Alert显示成功消息
+    alert(message);
+}
+
+function showError(message) {
+    alert(message);
+}
+
+function fillDefaultHeaders() {
+    const defaultHeaders = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
+        "Upgrade-Insecure-Requests": "1"
+    };
+    
+    const headersTextarea = document.getElementById('api-headers');
+    const currentHeaders = headersTextarea.value.trim();
+    
+    if (currentHeaders && currentHeaders !== '{}') {
+        if (!confirm('当前已有请求头内容，是否覆盖？')) {
+            return;
+        }
+    }
+    
+    headersTextarea.value = JSON.stringify(defaultHeaders, null, 2);
+}
+
+</script>
+</body>
+</html>

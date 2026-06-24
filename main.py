@@ -9,6 +9,7 @@ register_page / register_route 实现。
 
 import asyncio
 import base64
+import datetime
 import json
 import mimetypes
 import os
@@ -22,7 +23,9 @@ from aiohttp import web
 from core.base.logger import PLUGIN, get_logger, report_error
 from core.message._http import MessageType
 from core.message._media_send import _set_msg_or_event_id
-from core.plugin.decorators import handler, on_unload
+from core.message.keyboard import convert_simple_ark_data
+from core.message.media import upload_media_bytes
+from core.plugin.decorators import handler, on_load, on_unload
 from core.plugin.web_pages import register_page, register_route, unregister_page
 
 __plugin_meta__ = {
@@ -343,6 +346,259 @@ async def _handle_api_request(event, match, api_config):
     except Exception as e:
         report_error(PLUGIN, '自定义API', e)
         await event.reply(f'处理请求时出错: {e}')
+
+
+# ==================== 定时推送 (Cron) ====================
+
+class _PushEvent:
+    """用于定时推送场景的伪事件, 复用 _replace_variables / 模板渲染逻辑
+    (无触发消息, 故 user_id / content 为空, group_id 为目标群)。"""
+
+    def __init__(self, group_id=''):
+        self.user_id = ''
+        self.group_id = group_id or ''
+        self.content = ''
+
+
+def _parse_cron_field(field, lo, hi):
+    """解析单个 cron 字段, 返回允许值集合。支持 * , - / 语法。"""
+    values = set()
+    for part in field.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        step = 1
+        rng = part
+        if '/' in part:
+            rng, step_str = part.split('/', 1)
+            step = int(step_str)
+            if step <= 0:
+                raise ValueError(f'步长无效: {part}')
+        if rng == '*':
+            start, end = lo, hi
+        elif '-' in rng:
+            a, b = rng.split('-', 1)
+            start, end = int(a), int(b)
+        else:
+            start = end = int(rng)
+        for v in range(start, end + 1, step):
+            if lo <= v <= hi:
+                values.add(v)
+    return values
+
+
+def _cron_match(expr, dt):
+    """判断时间 dt 是否匹配标准 5 段 cron 表达式 (分 时 日 月 周)。"""
+    if not expr or not isinstance(expr, str):
+        return False
+    parts = expr.split()
+    if len(parts) != 5:
+        return False
+    minute, hour, dom, month, dow = parts
+    try:
+        if dt.minute not in _parse_cron_field(minute, 0, 59):
+            return False
+        if dt.hour not in _parse_cron_field(hour, 0, 23):
+            return False
+        if dt.month not in _parse_cron_field(month, 1, 12):
+            return False
+        # cron 周: 0/7=周日 .. 6=周六; Python weekday(): 周一=0..周日=6
+        cron_dow = (dt.weekday() + 1) % 7
+        dom_set = _parse_cron_field(dom, 1, 31)
+        dow_set = _parse_cron_field(dow, 0, 7)
+        if 7 in dow_set:
+            dow_set.add(0)
+        dom_restricted = dom.strip() != '*'
+        dow_restricted = dow.strip() != '*'
+        if dom_restricted and dow_restricted:
+            return dt.day in dom_set or cron_dow in dow_set
+        if dom_restricted:
+            return dt.day in dom_set
+        if dow_restricted:
+            return cron_dow in dow_set
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def _normalize_group_ids(api):
+    """从配置中提取群号列表 (兼容字符串 / 列表)。"""
+    raw = api.get('cron_group_ids', [])
+    if isinstance(raw, str):
+        raw = re.split(r'[,\n，\s]+', raw)
+    result = []
+    for gid in raw or []:
+        gid = str(gid).strip()
+        if gid and gid not in result:
+            result.append(gid)
+    return result
+
+
+def _get_sender(appid=''):
+    """从 BotManager 获取一个 sender (用于主动消息)。"""
+    try:
+        from core.bot.manager import _bot_manager_ref
+
+        if not _bot_manager_ref:
+            return None
+        bots = _bot_manager_ref._bots
+        if not bots:
+            return None
+        appid = (appid or '').strip()
+        if appid and appid in bots:
+            return bots[appid].sender
+        return next(iter(bots.values())).sender
+    except Exception as e:
+        log.warning(f'获取 sender 失败: {e}')
+        return None
+
+
+def _render_push_data(api_config, data, event, regex_groups=()):
+    """渲染推送消息内容 (与被动回复 _send_response 保持一致的模板处理)。"""
+    response_type = api_config.get('response_type', 'text')
+    message_template = api_config.get('message_template', '')
+    if message_template and response_type == 'json':
+        return _process_message_template(message_template, data, regex_groups)
+    if message_template and response_type == 'text':
+        result = message_template
+        for i, group in enumerate(regex_groups, 1):
+            result = result.replace(f'{{${i}}}', str(group) if group else '')
+        result = result.replace('{data}', str(data))
+        return _replace_variables(result, event, ())
+    return data
+
+
+async def _push_media(sender, group_id, data, file_type):
+    media = data if isinstance(data, bytes) else str(data)
+    file_info = await upload_media_bytes(sender, media, file_type, f'/v2/groups/{group_id}/files')
+    if not file_info:
+        log.warning(f'定时推送媒体上传失败 (group={group_id})')
+        return
+    await sender.send_to_group(group_id, None, media={'file_info': file_info})
+
+
+async def _push_ark(sender, group_id, template_id, kv_data):
+    if isinstance(kv_data, tuple | list) and template_id in (23, 24, 37):
+        kv_data = convert_simple_ark_data(template_id, kv_data)
+    payload = {
+        'msg_type': MessageType.MSG_TYPE_ARK,
+        'msg_seq': int(time.time() * 1000) % 1000000,
+        'content': '',
+        'ark': {'template_id': template_id, 'kv': kv_data},
+    }
+    await sender.post_json(f'/v2/groups/{group_id}/messages', payload)
+
+
+async def _push_template_markdown(sender, group_id, api_config, data, regex_groups):
+    params = _parse_params_from_template(str(data))
+    payload = {
+        'msg_type': MessageType.MSG_TYPE_MARKDOWN,
+        'msg_seq': int(time.time() * 1000) % 1000000,
+        'markdown': {
+            'custom_template_id': str(api_config.get('markdown_template', '1')),
+            'params': [{'key': f'text{i + 1}', 'values': [str(p)]} for i, p in enumerate(params)],
+        },
+    }
+    keyboard_id = (api_config.get('keyboard_id') or '').strip()
+    if keyboard_id:
+        payload['keyboard'] = {'id': keyboard_id}
+    await sender.post_json(f'/v2/groups/{group_id}/messages', payload)
+
+
+async def _push_to_group(sender, group_id, api_config, raw_data, regex_groups=()):
+    """根据回复类型主动推送到单个群。"""
+    event = _PushEvent(group_id)
+    reply_type = api_config.get('reply_type', 'text')
+    data = _render_push_data(api_config, raw_data, event, regex_groups)
+
+    if reply_type == 'text':
+        await sender.send_to_group(group_id, str(data), msg_type=MessageType.MSG_TYPE_TEXT)
+    elif reply_type == 'markdown':
+        await sender.send_to_group(group_id, str(data), msg_type=MessageType.MSG_TYPE_MARKDOWN)
+    elif reply_type == 'template_markdown':
+        await _push_template_markdown(sender, group_id, api_config, data, regex_groups)
+    elif reply_type == 'image':
+        image_text = _replace_variables(api_config.get('image_text', ''), event, regex_groups)
+        await sender.send_image('group', group_id, data if isinstance(data, bytes) else str(data), image_text)
+    elif reply_type == 'voice':
+        await _push_media(sender, group_id, data, 3)
+    elif reply_type == 'video':
+        await _push_media(sender, group_id, data, 2)
+    elif reply_type == 'ark':
+        try:
+            ark_type = int(api_config.get('ark_type', 23))
+        except (ValueError, TypeError):
+            ark_type = 23
+        await _push_ark(sender, group_id, ark_type, tuple(_parse_ark_params(data)))
+    else:
+        await sender.send_to_group(group_id, str(data))
+
+
+async def _run_scheduled_api(api):
+    """调用 API 并将结果推送到配置的所有群。"""
+    group_ids = _normalize_group_ids(api)
+    if not group_ids:
+        log.warning(f"定时推送 [{api.get('name', api.get('id', '?'))}] 未配置群号, 跳过")
+        return
+    sender = _get_sender(api.get('cron_appid', ''))
+    if not sender:
+        log.warning('定时推送无可用机器人 (sender 为空), 跳过')
+        return
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, _call_api, api, _PushEvent(), ())
+    if not result.get('success'):
+        log.warning(f"定时推送调用 API 失败: {result.get('error')}")
+        return
+    for group_id in group_ids:
+        try:
+            await _push_to_group(sender, group_id, api, result['data'], ())
+        except Exception as e:
+            report_error(PLUGIN, '自定义API', e)
+            log.warning(f'定时推送到群 {group_id} 失败: {e}')
+
+
+async def _run_due_tasks(now):
+    for api in _load_config().get('apis', []):
+        if not api.get('cron_enabled', False):
+            continue
+        if _cron_match(api.get('cron_expr', ''), now):
+            try:
+                await _run_scheduled_api(api)
+            except Exception as e:
+                report_error(PLUGIN, '自定义API', e)
+
+
+async def _scheduler_loop():
+    """对齐整分钟轮询, 每分钟检查一次到期的定时推送任务。"""
+    try:
+        while True:
+            now = datetime.datetime.now()
+            sleep_secs = 60 - now.second - now.microsecond / 1_000_000
+            await asyncio.sleep(max(sleep_secs, 1))
+            await _run_due_tasks(datetime.datetime.now())
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        report_error(PLUGIN, '自定义API', e)
+
+
+_scheduler_task = None
+
+
+@on_load
+async def _start_scheduler():
+    global _scheduler_task
+    if _scheduler_task is None or _scheduler_task.done():
+        _scheduler_task = asyncio.create_task(_scheduler_loop())
+        log.info('定时推送调度器已启动')
+
+
+@on_unload
+def _stop_scheduler():
+    global _scheduler_task
+    if _scheduler_task is not None and not _scheduler_task.done():
+        _scheduler_task.cancel()
+    _scheduler_task = None
 
 
 # ==================== 动态注册处理器 ====================

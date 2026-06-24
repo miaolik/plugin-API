@@ -661,22 +661,33 @@ async def _scheduler_loop():
         report_error(PLUGIN, '自定义API', e)
 
 
+_SCHEDULER_TASK_NAME = 'custom_api_scheduler'
 _scheduler_task = None
+
+
+def _cancel_existing_schedulers():
+    """取消所有残留的调度器任务, 防止热重载导致多个调度器并存而重复推送。"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    for task in asyncio.all_tasks(loop):
+        if task.get_name() == _SCHEDULER_TASK_NAME and not task.done():
+            task.cancel()
 
 
 @on_load
 async def _start_scheduler():
     global _scheduler_task
-    if _scheduler_task is None or _scheduler_task.done():
-        _scheduler_task = asyncio.create_task(_scheduler_loop())
-        log.info('定时推送调度器已启动')
+    _cancel_existing_schedulers()
+    _scheduler_task = asyncio.create_task(_scheduler_loop(), name=_SCHEDULER_TASK_NAME)
+    log.info('定时推送调度器已启动')
 
 
 @on_unload
-def _stop_scheduler():
+async def _stop_scheduler():
     global _scheduler_task
-    if _scheduler_task is not None and not _scheduler_task.done():
-        _scheduler_task.cancel()
+    _cancel_existing_schedulers()
     _scheduler_task = None
 
 

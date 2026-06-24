@@ -15,6 +15,7 @@ import mimetypes
 import os
 import re
 import time
+import urllib.parse
 import uuid
 
 import aiohttp
@@ -472,27 +473,55 @@ def _render_push_data(api_config, data, event, regex_groups=()):
 # 媒体下载上限 (与框架 _MAX_MEDIA_DOWNLOAD 对齐), 防止 OOM
 _MAX_MEDIA_DOWNLOAD = 100 * 1024 * 1024
 
+# 部分 jsDelivr 镜像有防盗链/区域限制, 服务端直接下载会 403; 失败时回退到官方镜像。
+_JSDELIVR_FALLBACK_HOSTS = ('cdn.jsdelivr.net', 'fastly.jsdelivr.net', 'gcore.jsdelivr.net')
+_JSDELIVR_PATH_PREFIXES = ('/gh/', '/npm/', '/wp/', '/combine/', '/hg/')
+
+
+def _media_url_candidates(url):
+    """返回可尝试下载的 URL 列表: 原始 URL + (jsDelivr 路径时) 官方镜像回退。"""
+    candidates = [url]
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return candidates
+    if (parsed.path or '').startswith(_JSDELIVR_PATH_PREFIXES):
+        for host in _JSDELIVR_FALLBACK_HOSTS:
+            if host == parsed.netloc:
+                continue
+            alt = urllib.parse.urlunparse(parsed._replace(netloc=host))
+            if alt not in candidates:
+                candidates.append(alt)
+    return candidates
+
 
 async def _download_media_bytes(url):
-    """下载媒体为 bytes (URL 直传失败时的回退)。超过上限或失败返回 None。"""
-    try:
-        timeout = aiohttp.ClientTimeout(total=60)
-        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(url) as resp:
-            if resp.status != 200:
-                log.warning(f'下载媒体失败: HTTP {resp.status} ({url})')
-                return None
-            cl = int(resp.headers.get('Content-Length', 0) or 0)
-            if cl > _MAX_MEDIA_DOWNLOAD:
-                log.warning(f'媒体过大 ({cl} bytes), 跳过下载')
-                return None
-            body = await resp.read()
-            if len(body) > _MAX_MEDIA_DOWNLOAD:
-                log.warning(f'媒体实际大小超限 ({len(body)} bytes), 丢弃')
-                return None
-            return body
-    except Exception as e:
-        log.warning(f'下载媒体失败: {e} ({url})')
-        return None
+    """下载媒体为 bytes (URL 直传失败时的回退)。超过上限或全部失败返回 None。
+    带浏览器 UA; jsDelivr 镜像 403 时自动回退到官方镜像。"""
+    headers = {'User-Agent': _DEFAULT_HEADERS['User-Agent']}
+    timeout = aiohttp.ClientTimeout(total=60)
+    candidates = _media_url_candidates(url)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        for candidate in candidates:
+            try:
+                async with session.get(candidate, headers=headers) as resp:
+                    if resp.status != 200:
+                        log.warning(f'下载媒体失败: HTTP {resp.status} ({candidate})')
+                        continue
+                    cl = int(resp.headers.get('Content-Length', 0) or 0)
+                    if cl > _MAX_MEDIA_DOWNLOAD:
+                        log.warning(f'媒体过大 ({cl} bytes), 跳过下载')
+                        return None
+                    body = await resp.read()
+                    if len(body) > _MAX_MEDIA_DOWNLOAD:
+                        log.warning(f'媒体实际大小超限 ({len(body)} bytes), 丢弃')
+                        return None
+                    if candidate != url:
+                        log.info(f'镜像回退下载成功: {candidate}')
+                    return body
+            except Exception as e:
+                log.warning(f'下载媒体失败: {e} ({candidate})')
+    return None
 
 
 async def _upload_media_robust(sender, group_id, data, file_type):

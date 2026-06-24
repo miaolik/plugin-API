@@ -17,6 +17,7 @@ import re
 import time
 import uuid
 
+import aiohttp
 import requests
 from aiohttp import web
 
@@ -468,13 +469,62 @@ def _render_push_data(api_config, data, event, regex_groups=()):
     return data
 
 
-async def _push_media(sender, group_id, data, file_type):
-    media = data if isinstance(data, bytes) else str(data)
-    file_info = await upload_media_bytes(sender, media, file_type, f'/v2/groups/{group_id}/files')
+# 媒体下载上限 (与框架 _MAX_MEDIA_DOWNLOAD 对齐), 防止 OOM
+_MAX_MEDIA_DOWNLOAD = 100 * 1024 * 1024
+
+
+async def _download_media_bytes(url):
+    """下载媒体为 bytes (URL 直传失败时的回退)。超过上限或失败返回 None。"""
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(url) as resp:
+            if resp.status != 200:
+                log.warning(f'下载媒体失败: HTTP {resp.status} ({url})')
+                return None
+            cl = int(resp.headers.get('Content-Length', 0) or 0)
+            if cl > _MAX_MEDIA_DOWNLOAD:
+                log.warning(f'媒体过大 ({cl} bytes), 跳过下载')
+                return None
+            body = await resp.read()
+            if len(body) > _MAX_MEDIA_DOWNLOAD:
+                log.warning(f'媒体实际大小超限 ({len(body)} bytes), 丢弃')
+                return None
+            return body
+    except Exception as e:
+        log.warning(f'下载媒体失败: {e} ({url})')
+        return None
+
+
+async def _upload_media_robust(sender, group_id, data, file_type):
+    """上传媒体, 返回 file_info。对齐框架被动回复的健壮逻辑:
+    bytes 直接上传; URL 先尝试直传(由 QQ 下载), 失败则本地下载后按字节上传。"""
+    endpoint = f'/v2/groups/{group_id}/files'
+    if isinstance(data, bytes):
+        return await upload_media_bytes(sender, data, file_type, endpoint)
+    media = str(data)
+    file_info = await upload_media_bytes(sender, media, file_type, endpoint)
+    if file_info:
+        return file_info
+    if media.startswith(('http://', 'https://')):
+        log.debug(f'URL 直传失败, 回退下载上传: {media}')
+        body = await _download_media_bytes(media)
+        if body:
+            return await upload_media_bytes(sender, body, file_type, endpoint)
+    return None
+
+
+async def _push_media(sender, group_id, data, file_type, content=''):
+    file_info = await _upload_media_robust(sender, group_id, data, file_type)
     if not file_info:
         log.warning(f'定时推送媒体上传失败 (group={group_id})')
         return
-    await sender.send_to_group(group_id, None, media={'file_info': file_info})
+    payload = {
+        'msg_type': MessageType.MSG_TYPE_MEDIA,
+        'msg_seq': int(time.time() * 1000) % 1000000,
+        'content': content or '',
+        'media': {'file_info': file_info},
+    }
+    await sender.post_json(f'/v2/groups/{group_id}/messages', payload)
 
 
 async def _push_ark(sender, group_id, template_id, kv_data):
@@ -519,7 +569,7 @@ async def _push_to_group(sender, group_id, api_config, raw_data, regex_groups=()
         await _push_template_markdown(sender, group_id, api_config, data, regex_groups)
     elif reply_type == 'image':
         image_text = _replace_variables(api_config.get('image_text', ''), event, regex_groups)
-        await sender.send_image('group', group_id, data if isinstance(data, bytes) else str(data), image_text)
+        await _push_media(sender, group_id, data, 1, image_text)
     elif reply_type == 'voice':
         await _push_media(sender, group_id, data, 3)
     elif reply_type == 'video':

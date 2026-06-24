@@ -292,6 +292,42 @@ code {
                             </select>
                         </div>
                         </div>
+
+                    <!-- 定时推送 (Cron) -->
+                    <div class="card mb-3">
+                        <div class="card-header d-flex align-items-center justify-content-between">
+                            <span><i class="bi bi-clock-history"></i> 定时推送 (Cron)</span>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="api-cron-enabled" onchange="updateCronConfig()">
+                                <label class="form-check-label" for="api-cron-enabled">启用定时推送</label>
+                            </div>
+                        </div>
+                        <div class="card-body" id="cron-config" style="display:none;">
+                            <div class="alert alert-info small">
+                                <i class="bi bi-info-circle"></i> 启用后，机器人会按 Cron 表达式定时调用本 API，并将结果作为<strong>主动消息</strong>推送到下方配置的群聊（支持上方所有回复类型）。定时推送独立于「正则触发」，可单独使用。
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Cron 表达式</label>
+                                    <input type="text" class="form-control" id="api-cron-expr" placeholder="0 9 * * *">
+                                    <small class="text-muted">
+                                        标准 5 段：<code>分 时 日 月 周</code>，支持 <code>* , - /</code>。
+                                        <br>示例：<code>0 9 * * *</code> 每天9点 ｜ <code>*/30 * * * *</code> 每30分钟 ｜ <code>0 12 * * 1</code> 每周一12点
+                                    </small>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">推送机器人 AppID (可选)</label>
+                                    <input type="text" class="form-control" id="api-cron-appid" placeholder="留空则使用第一个机器人">
+                                    <small class="text-muted">多机器人时指定用哪个发送</small>
+                                </div>
+                            </div>
+                            <div class="mb-1">
+                                <label class="form-label">推送群聊 ID（可多个）</label>
+                                <textarea class="form-control" id="api-cron-group-ids" rows="3" placeholder="每行一个群号，或用逗号分隔，例如：&#10;123456789&#10;987654321"></textarea>
+                                <small class="text-muted">支持多个群号，换行或逗号分隔</small>
+                            </div>
+                        </div>
+                    </div>
                 </form>
                     </div>
                             </div>
@@ -521,9 +557,15 @@ function renderApiList(apis) {
         if (api.group_only) permissions.push('群聊');
         const permText = permissions.length > 0 ? permissions.join(', ') : '无限制';
         
+        let cronBadge = '';
+        if (api.cron_enabled && api.cron_expr) {
+            const groupCount = Array.isArray(api.cron_group_ids) ? api.cron_group_ids.length : 0;
+            cronBadge = ` <span class="badge bg-info" title="定时推送: ${api.cron_expr} → ${groupCount}个群"><i class="bi bi-clock-history"></i> 定时</span>`;
+        }
+        
         html += `<tr>
             <td>${statusBadge}</td>
-            <td><strong>${api.name}</strong></td>
+            <td><strong>${api.name}</strong>${cronBadge}</td>
             <td><code style="font-size: 0.85em;">${api.regex}</code></td>
             <td><small class="text-muted">${api.url.substring(0, 60)}${api.url.length > 60 ? '...' : ''}</small></td>
             <td>${api.reply_type}</td>
@@ -570,8 +612,15 @@ function showAddApiModal() {
     };
     document.getElementById('api-headers').value = JSON.stringify(defaultHeaders, null, 2);
     
+    // 重置定时推送配置
+    document.getElementById('api-cron-enabled').checked = false;
+    document.getElementById('api-cron-expr').value = '';
+    document.getElementById('api-cron-appid').value = '';
+    document.getElementById('api-cron-group-ids').value = '';
+    
     updateResponseConfig();
     updateReplyConfig();
+    updateCronConfig();
     
     // 确保高级设置是折叠的
     const advancedSettingsEl = document.getElementById('advancedSettings');
@@ -639,6 +688,15 @@ function editApi(apiId) {
             document.getElementById('api-owner-only').checked = api.owner_only || false;
             document.getElementById('api-group-only').checked = api.group_only || false;
             
+            // 定时推送配置
+            document.getElementById('api-cron-enabled').checked = api.cron_enabled || false;
+            document.getElementById('api-cron-expr').value = api.cron_expr || '';
+            document.getElementById('api-cron-appid').value = api.cron_appid || '';
+            const cronGroupIds = Array.isArray(api.cron_group_ids)
+                ? api.cron_group_ids.join('\n')
+                : (api.cron_group_ids || '');
+            document.getElementById('api-cron-group-ids').value = cronGroupIds;
+            
             // 如果有高级设置内容，自动展开
             const hasAdvancedSettings = (api.headers && Object.keys(api.headers).length > 0) ||
                                        (api.params && Object.keys(api.params).length > 0) ||
@@ -652,6 +710,7 @@ function editApi(apiId) {
             
             updateResponseConfig();
             updateReplyConfig();
+            updateCronConfig();
             
             // 确保Modal已初始化
             if (!apiModal) {
@@ -689,13 +748,33 @@ function saveApi() {
         return;
     }
     
+    const cronEnabled = document.getElementById('api-cron-enabled').checked;
+    const cronExpr = document.getElementById('api-cron-expr').value.trim();
+    const cronGroupIds = document.getElementById('api-cron-group-ids').value
+        .split(/[\n,，]/).map(s => s.trim()).filter(s => s.length > 0);
+    if (cronEnabled) {
+        if (!cronExpr || cronExpr.split(/\s+/).length !== 5) {
+            showError('定时推送已启用，请填写合法的 5 段 Cron 表达式（分 时 日 月 周）');
+            return;
+        }
+        if (cronGroupIds.length === 0) {
+            showError('定时推送已启用，请至少填写一个推送群聊 ID');
+            return;
+        }
+    }
+    
     // 自动为正则添加^和$
     let regex = document.getElementById('api-regex').value.trim();
-    if (!regex.startsWith('^')) {
-        regex = '^' + regex;
-    }
-    if (!regex.endsWith('$')) {
-        regex = regex + '$';
+    if (regex) {
+        if (!regex.startsWith('^')) {
+            regex = '^' + regex;
+        }
+        if (!regex.endsWith('$')) {
+            regex = regex + '$';
+        }
+    } else if (!cronEnabled) {
+        showError('请填写触发正则，或启用定时推送');
+        return;
     }
     
     const apiData = {
@@ -717,7 +796,14 @@ function saveApi() {
         keyboard_id: document.getElementById('api-keyboard-id').value,
         ark_type: document.getElementById('api-ark-type').value,
         owner_only: document.getElementById('api-owner-only').checked,
-        group_only: document.getElementById('api-group-only').checked
+        group_only: document.getElementById('api-group-only').checked,
+        cron_enabled: document.getElementById('api-cron-enabled').checked,
+        cron_expr: document.getElementById('api-cron-expr').value.trim(),
+        cron_appid: document.getElementById('api-cron-appid').value.trim(),
+        cron_group_ids: document.getElementById('api-cron-group-ids').value
+            .split(/[\n,，]/)
+            .map(s => s.trim())
+            .filter(s => s.length > 0)
     };
     
     const urlParams = new URLSearchParams(window.location.search);
@@ -1234,6 +1320,11 @@ function updateReplyConfig() {
     } else if (replyType === 'ark') {
         document.getElementById('ark-config').style.display = 'block';
     }
+}
+
+function updateCronConfig() {
+    const enabled = document.getElementById('api-cron-enabled').checked;
+    document.getElementById('cron-config').style.display = enabled ? 'block' : 'none';
 }
 
 function generateId() {

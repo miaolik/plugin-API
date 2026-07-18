@@ -406,16 +406,7 @@ async def _reply_template_markdown(event, api_config, data, regex_groups):
 
 
 async def _handle_api_request(event, match, api_config):
-    """处理单条 API 请求 (由动态注册的 handler 调用)。
-    同一事件同一 API 只处理一次: 防止热重载残留旧 handler 时同一指令重复回复。"""
-    done = getattr(event, '_custom_api_done', None)
-    if done is None:
-        done = set()
-        event._custom_api_done = done
-    key = api_config.get('id') or api_config.get('regex', '')
-    if key in done:
-        return
-    done.add(key)
+    """处理单条 API 请求 (由动态注册的 handler 调用)。"""
     try:
         regex_groups = match.groups() if match else ()
         loop = asyncio.get_running_loop()

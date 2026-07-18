@@ -134,7 +134,7 @@ _SIXTY_ID_PREFIX = 'sixty_'
 # 每项: key(唯一标识), name, desc, regex(触发正则), path(接口路径), params(默认参数,
 # 支持 {$1} 等变量), 可选 response_type/reply_type/message_template (默认 text/text/无)
 _SIXTY_PRESETS = [
-    {'key': '60s', 'name': '每天60s读懂世界', 'desc': '每日精选15条新闻+微语', 'regex': '^(60s|每日新闻)$', 'path': '/v2/60s', 'params': {'encoding': 'text'}},
+    {'key': '60s', 'name': '每天60s读懂世界', 'desc': '每日精选15条新闻+微语', 'regex': '^(60s|每日新闻|读懂世界)$', 'path': '/v2/60s', 'params': {'encoding': 'text'}},
     {'key': '60s_image', 'name': '60s新闻图', 'desc': '每日新闻长图', 'regex': '^(60s图|新闻图)$', 'path': '/v2/60s', 'params': {}, 'response_type': 'json', 'reply_type': 'image', 'message_template': '{data.image}'},
     {'key': 'bing', 'name': '必应每日壁纸', 'desc': 'Bing 每日壁纸大图', 'regex': '^(必应壁纸|bing壁纸)$', 'path': '/v2/bing', 'params': {}, 'response_type': 'json', 'reply_type': 'image', 'message_template': '{data.cover}'},
     {'key': 'hitokoto', 'name': '一言', 'desc': '随机一句话文案', 'regex': '^一言$', 'path': '/v2/hitokoto', 'params': {'encoding': 'text'}},
@@ -406,7 +406,16 @@ async def _reply_template_markdown(event, api_config, data, regex_groups):
 
 
 async def _handle_api_request(event, match, api_config):
-    """处理单条 API 请求 (由动态注册的 handler 调用)。"""
+    """处理单条 API 请求 (由动态注册的 handler 调用)。
+    同一事件同一 API 只处理一次: 防止热重载残留旧 handler 时同一指令重复回复。"""
+    done = getattr(event, '_custom_api_done', None)
+    if done is None:
+        done = set()
+        event._custom_api_done = done
+    key = api_config.get('id') or api_config.get('regex', '')
+    if key in done:
+        return
+    done.add(key)
     try:
         regex_groups = match.groups() if match else ()
         loop = asyncio.get_running_loop()

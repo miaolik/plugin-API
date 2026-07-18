@@ -157,12 +157,12 @@ _SIXTY_PRESETS = [
     {'key': 'epic', 'name': 'Epic免费游戏', 'desc': 'Epic 喜加一信息', 'regex': '^(epic|喜加一)$', 'path': '/v2/epic', 'params': {'encoding': 'text'}},
     {'key': 'lunar', 'name': '农历信息', 'desc': '今日农历/宜忌', 'regex': '^(农历|黄历)$', 'path': '/v2/lunar', 'params': {'encoding': 'text'}},
     {'key': 'exchange_rate', 'name': '汇率查询', 'desc': '汇率 币种 (如: 汇率 USD, 默认CNY)', 'regex': '^汇率\\s*([A-Za-z]*)$', 'path': '/v2/exchange-rate', 'params': {'encoding': 'text', 'currency': '{$1}'}},
-    {'key': 'weather', 'name': '实时天气', 'desc': '天气 城市名', 'regex': '^天气\\s+(.+)$', 'path': '/v2/weather', 'params': {'encoding': 'text', 'query': '{$1}'}},
-    {'key': 'weather_forecast', 'name': '天气预报', 'desc': '天气预报 城市名 (未来7天)', 'regex': '^天气预报\\s+(.+)$', 'path': '/v2/weather/forecast', 'params': {'encoding': 'text', 'query': '{$1}'}},
-    {'key': 'fanyi', 'name': '翻译', 'desc': '翻译 内容 (自动识别语言)', 'regex': '^翻译\\s+(.+)$', 'path': '/v2/fanyi', 'params': {'encoding': 'text', 'text': '{$1}'}},
-    {'key': 'baike', 'name': '百科查询', 'desc': '百科 词条名', 'regex': '^百科\\s+(.+)$', 'path': '/v2/baike', 'params': {'encoding': 'text', 'word': '{$1}'}},
-    {'key': 'ip', 'name': 'IP查询', 'desc': 'ip查询 IP地址', 'regex': '^ip查询\\s+(.+)$', 'path': '/v2/ip', 'params': {'encoding': 'text', 'ip': '{$1}'}},
-    {'key': 'whois', 'name': 'Whois查询', 'desc': 'whois 域名', 'regex': '^whois\\s+(.+)$', 'path': '/v2/whois', 'params': {'encoding': 'text', 'domain': '{$1}'}},
+    {'key': 'weather', 'name': '实时天气', 'desc': '天气 城市名', 'regex': '^天气(?!预报)\\s*(.+)$', 'path': '/v2/weather', 'params': {'encoding': 'text', 'query': '{$1}'}},
+    {'key': 'weather_forecast', 'name': '天气预报', 'desc': '天气预报 城市名 (未来7天)', 'regex': '^天气预报\\s*(.+)$', 'path': '/v2/weather/forecast', 'params': {'encoding': 'text', 'query': '{$1}'}},
+    {'key': 'fanyi', 'name': '翻译', 'desc': '翻译 内容 (自动识别语言)', 'regex': '^翻译\\s*(.+)$', 'path': '/v2/fanyi', 'params': {'encoding': 'text', 'text': '{$1}'}},
+    {'key': 'baike', 'name': '百科查询', 'desc': '百科 词条名', 'regex': '^百科\\s*(.+)$', 'path': '/v2/baike', 'params': {'encoding': 'text', 'word': '{$1}'}},
+    {'key': 'ip', 'name': 'IP查询', 'desc': 'ip查询 IP地址', 'regex': '^ip查询\\s*(.+)$', 'path': '/v2/ip', 'params': {'encoding': 'text', 'ip': '{$1}'}},
+    {'key': 'whois', 'name': 'Whois查询', 'desc': 'whois 域名', 'regex': '^whois\\s*(.+)$', 'path': '/v2/whois', 'params': {'encoding': 'text', 'domain': '{$1}'}},
 ]
 
 
@@ -406,7 +406,16 @@ async def _reply_template_markdown(event, api_config, data, regex_groups):
 
 
 async def _handle_api_request(event, match, api_config):
-    """处理单条 API 请求 (由动态注册的 handler 调用)。"""
+    """处理单条 API 请求 (由动态注册的 handler 调用)。
+    同一事件同一 API 只处理一次: 防止热重载残留旧 handler 时同一指令重复回复。"""
+    done = getattr(event, '_custom_api_done', None)
+    if done is None:
+        done = set()
+        event._custom_api_done = done
+    key = api_config.get('id') or api_config.get('regex', '')
+    if key in done:
+        return
+    done.add(key)
     try:
         regex_groups = match.groups() if match else ()
         loop = asyncio.get_running_loop()

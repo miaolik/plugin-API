@@ -123,6 +123,75 @@ async def _reload_self():
         log.warning(f'热重载失败: {e}')
 
 
+# ==================== 60s API 预设库 ====================
+# 项目: https://github.com/vikiboss/60s  文档: https://docs.60s-api.viki.moe/
+# 公共实例开箱即用, 无需本地部署; 也可自行部署后在 Web 面板修改基础地址。
+
+_SIXTY_DEFAULT_BASE = 'https://60s.viki.moe'
+_SIXTY_ID_PREFIX = 'sixty_'
+
+# 每项: key(唯一标识), name, desc, regex(触发正则), path(接口路径), params(默认参数,
+# 支持 {$1} 等变量), 可选 response_type/reply_type/message_template (默认 text/text/无)
+_SIXTY_PRESETS = [
+    {'key': '60s', 'name': '每天60s读懂世界', 'desc': '每日精选15条新闻+微语', 'regex': '^(60s|每日新闻|读懂世界)$', 'path': '/v2/60s', 'params': {'encoding': 'text'}},
+    {'key': '60s_image', 'name': '60s新闻图', 'desc': '每日新闻长图', 'regex': '^(60s图|新闻图)$', 'path': '/v2/60s', 'params': {}, 'response_type': 'json', 'reply_type': 'image', 'message_template': '{data.image}'},
+    {'key': 'bing', 'name': '必应每日壁纸', 'desc': 'Bing 每日壁纸大图', 'regex': '^(必应壁纸|bing壁纸)$', 'path': '/v2/bing', 'params': {}, 'response_type': 'json', 'reply_type': 'image', 'message_template': '{data.cover}'},
+    {'key': 'hitokoto', 'name': '一言', 'desc': '随机一句话文案', 'regex': '^一言$', 'path': '/v2/hitokoto', 'params': {'encoding': 'text'}},
+    {'key': 'duanzi', 'name': '随机段子', 'desc': '随机搞笑段子', 'regex': '^(段子|讲个段子)$', 'path': '/v2/duanzi', 'params': {'encoding': 'text'}},
+    {'key': 'kfc', 'name': '疯狂星期四', 'desc': 'KFC v50 文案', 'regex': '^(kfc|疯狂星期四|v50)$', 'path': '/v2/kfc', 'params': {'encoding': 'text'}},
+    {'key': 'fabing', 'name': '发病文学', 'desc': '发病 对象名 (可省略)', 'regex': '^发病\\s*(.*)$', 'path': '/v2/fabing', 'params': {'encoding': 'text', 'name': '{$1}'}},
+    {'key': 'answer', 'name': '答案之书', 'desc': '随机一条人生答案', 'regex': '^(答案之书|答案)$', 'path': '/v2/answer', 'params': {'encoding': 'text'}},
+    {'key': 'luck', 'name': '今日运势', 'desc': '随机运势签文', 'regex': '^(今日运势|运势)$', 'path': '/v2/luck', 'params': {'encoding': 'text'}},
+    {'key': 'dad_joke', 'name': '冷笑话', 'desc': '随机冷笑话', 'regex': '^冷笑话$', 'path': '/v2/dad-joke', 'params': {'encoding': 'text'}},
+    {'key': 'weibo', 'name': '微博热搜', 'desc': '微博实时热搜榜', 'regex': '^微博热搜$', 'path': '/v2/weibo', 'params': {'encoding': 'text'}},
+    {'key': 'zhihu', 'name': '知乎热榜', 'desc': '知乎实时热榜', 'regex': '^知乎热榜$', 'path': '/v2/zhihu', 'params': {'encoding': 'text'}},
+    {'key': 'douyin', 'name': '抖音热搜', 'desc': '抖音实时热搜榜', 'regex': '^抖音热搜$', 'path': '/v2/douyin', 'params': {'encoding': 'text'}},
+    {'key': 'toutiao', 'name': '头条热搜', 'desc': '今日头条热搜榜', 'regex': '^(头条热搜|今日头条)$', 'path': '/v2/toutiao', 'params': {'encoding': 'text'}},
+    {'key': 'baidu_hot', 'name': '百度热搜', 'desc': '百度实时热搜榜', 'regex': '^百度热搜$', 'path': '/v2/baidu/hot', 'params': {'encoding': 'text'}},
+    {'key': 'hacker_news', 'name': 'HackerNews', 'desc': 'HackerNews 热帖', 'regex': '^(hn|hackernews)$', 'path': '/v2/hacker-news/top', 'params': {'encoding': 'text'}},
+    {'key': 'it_news', 'name': 'IT资讯', 'desc': 'IT 科技新闻', 'regex': '^(it新闻|it资讯)$', 'path': '/v2/it-news', 'params': {'encoding': 'text'}},
+    {'key': 'ai_news', 'name': 'AI新闻', 'desc': 'AI 领域新闻', 'regex': '^(ai新闻|ai资讯)$', 'path': '/v2/ai-news', 'params': {'encoding': 'text'}},
+    {'key': 'history', 'name': '历史上的今天', 'desc': '当天的历史事件', 'regex': '^历史上的今天$', 'path': '/v2/today-in-history', 'params': {'encoding': 'text'}},
+    {'key': 'moyu', 'name': '摸鱼日历', 'desc': '打工人摸鱼日历/假期倒计时', 'regex': '^(摸鱼|摸鱼日历)$', 'path': '/v2/moyu', 'params': {'encoding': 'text'}},
+    {'key': 'epic', 'name': 'Epic免费游戏', 'desc': 'Epic 喜加一信息', 'regex': '^(epic|喜加一)$', 'path': '/v2/epic', 'params': {'encoding': 'text'}},
+    {'key': 'lunar', 'name': '农历信息', 'desc': '今日农历/宜忌', 'regex': '^(农历|黄历)$', 'path': '/v2/lunar', 'params': {'encoding': 'text'}},
+    {'key': 'exchange_rate', 'name': '汇率查询', 'desc': '汇率 币种 (如: 汇率 USD, 默认CNY)', 'regex': '^汇率\\s*([A-Za-z]*)$', 'path': '/v2/exchange-rate', 'params': {'encoding': 'text', 'currency': '{$1}'}},
+    {'key': 'weather', 'name': '实时天气', 'desc': '天气 城市名', 'regex': '^天气\\s+(.+)$', 'path': '/v2/weather', 'params': {'encoding': 'text', 'query': '{$1}'}},
+    {'key': 'weather_forecast', 'name': '天气预报', 'desc': '天气预报 城市名 (未来7天)', 'regex': '^天气预报\\s+(.+)$', 'path': '/v2/weather/forecast', 'params': {'encoding': 'text', 'query': '{$1}'}},
+    {'key': 'fanyi', 'name': '翻译', 'desc': '翻译 内容 (自动识别语言)', 'regex': '^翻译\\s+(.+)$', 'path': '/v2/fanyi', 'params': {'encoding': 'text', 'text': '{$1}'}},
+    {'key': 'baike', 'name': '百科查询', 'desc': '百科 词条名', 'regex': '^百科\\s+(.+)$', 'path': '/v2/baike', 'params': {'encoding': 'text', 'word': '{$1}'}},
+    {'key': 'ip', 'name': 'IP查询', 'desc': 'ip查询 IP地址', 'regex': '^ip查询\\s+(.+)$', 'path': '/v2/ip', 'params': {'encoding': 'text', 'ip': '{$1}'}},
+    {'key': 'whois', 'name': 'Whois查询', 'desc': 'whois 域名', 'regex': '^whois\\s+(.+)$', 'path': '/v2/whois', 'params': {'encoding': 'text', 'domain': '{$1}'}},
+]
+
+
+def _sixty_base_url(config=None):
+    config = config or _load_config()
+    return (config.get('sixty_base_url') or _SIXTY_DEFAULT_BASE).rstrip('/')
+
+
+def _sixty_build_api(preset, base_url):
+    """由预设生成一条标准 API 配置 (与手动添加的 API 结构一致, 后端可继续编辑)。"""
+    return {
+        'id': f"{_SIXTY_ID_PREFIX}{preset['key']}",
+        'sixty_key': preset['key'],
+        'sixty_path': preset['path'],
+        'name': f"60s·{preset['name']}",
+        'description': preset['desc'],
+        'regex': preset['regex'],
+        'url': f"{base_url}{preset['path']}",
+        'method': 'GET',
+        'headers': {},
+        'params': dict(preset.get('params', {})),
+        'body': {},
+        'timeout': 15,
+        'response_type': preset.get('response_type', 'text'),
+        'reply_type': preset.get('reply_type', 'text'),
+        'message_template': preset.get('message_template', ''),
+        'enabled': True,
+    }
+
+
 # ==================== API 调用 ====================
 
 def _replace_variables(text, event, regex_groups=()):
@@ -797,6 +866,82 @@ async def api_toggle_api(request):
         await _reload_self()
         return web.json_response({'success': True, 'message': '操作成功'})
     return web.json_response({'success': False, 'message': '操作失败'})
+
+
+@register_route('GET', '/api/ext/custom_api/sixty/presets')
+async def api_sixty_presets(request):
+    """60s 预设列表: 含每个预设是否已添加, 及当前基础地址。"""
+    config = _load_config()
+    added_ids = {a.get('id') for a in config.get('apis', [])}
+    presets = []
+    for p in _SIXTY_PRESETS:
+        presets.append({
+            'key': p['key'],
+            'name': p['name'],
+            'desc': p['desc'],
+            'regex': p['regex'],
+            'path': p['path'],
+            'reply_type': p.get('reply_type', 'text'),
+            'added': f"{_SIXTY_ID_PREFIX}{p['key']}" in added_ids,
+        })
+    return web.json_response({'success': True, 'data': {
+        'base_url': _sixty_base_url(config),
+        'default_base_url': _SIXTY_DEFAULT_BASE,
+        'presets': presets,
+    }})
+
+
+@register_route('POST', '/api/ext/custom_api/sixty/add')
+async def api_sixty_add(request):
+    """添加 (或重置) 一批 60s 预设为标准 API 配置, 之后可在 API 列表中继续调整参数。"""
+    body = await _json_body(request)
+    keys = body.get('keys') or []
+    if isinstance(keys, str):
+        keys = [keys]
+    presets = {p['key']: p for p in _SIXTY_PRESETS}
+    invalid = [k for k in keys if k not in presets]
+    if not keys or invalid:
+        return web.json_response({'success': False, 'message': f'预设 key 无效: {invalid or "(空)"}'})
+    config = _load_config()
+    base_url = _sixty_base_url(config)
+    apis = config.setdefault('apis', [])
+    added, updated = [], []
+    for k in keys:
+        new_api = _sixty_build_api(presets[k], base_url)
+        idx = next((i for i, a in enumerate(apis) if a.get('id') == new_api['id']), None)
+        if idx is not None:
+            apis[idx] = new_api
+            updated.append(k)
+        else:
+            apis.append(new_api)
+            added.append(k)
+    if _save_config(config):
+        await _reload_self()
+        return web.json_response({'success': True, 'message': f'已添加 {len(added)} 个, 重置 {len(updated)} 个', 'data': {'added': added, 'updated': updated}})
+    return web.json_response({'success': False, 'message': '保存失败'})
+
+
+@register_route('POST', '/api/ext/custom_api/sixty/base_url')
+async def api_sixty_base_url(request):
+    """设置 60s 基础地址 (公共实例或自部署实例), 并同步更新所有已添加的 60s API 的 URL。"""
+    body = await _json_body(request)
+    base_url = str(body.get('base_url', '')).strip().rstrip('/')
+    if not base_url:
+        base_url = _SIXTY_DEFAULT_BASE
+    if not base_url.startswith(('http://', 'https://')):
+        return web.json_response({'success': False, 'message': '基础地址需以 http(s):// 开头'})
+    config = _load_config()
+    config['sixty_base_url'] = base_url
+    updated = 0
+    for api in config.get('apis', []):
+        path = api.get('sixty_path')
+        if str(api.get('id', '')).startswith(_SIXTY_ID_PREFIX) and path:
+            api['url'] = f'{base_url}{path}'
+            updated += 1
+    if _save_config(config):
+        await _reload_self()
+        return web.json_response({'success': True, 'message': f'基础地址已更新, 同步了 {updated} 个 60s API'})
+    return web.json_response({'success': False, 'message': '保存失败'})
 
 
 @register_route('GET', '/api/ext/custom_api/temp', auth=False)

@@ -134,7 +134,7 @@ _SIXTY_ID_PREFIX = 'sixty_'
 # 每项: key(唯一标识), name, desc, regex(触发正则), path(接口路径), params(默认参数,
 # 支持 {$1} 等变量), 可选 response_type/reply_type/message_template (默认 text/text/无)
 _SIXTY_PRESETS = [
-    {'key': '60s', 'name': '每天60s读懂世界', 'desc': '每日精选15条新闻+微语', 'regex': '^(60s|每日新闻|读懂世界)$', 'path': '/v2/60s', 'params': {'encoding': 'text'}},
+    {'key': '60s', 'name': '每天60s读懂世界', 'desc': '每日精选15条新闻+微语', 'regex': '^(60s|每日新闻)$', 'path': '/v2/60s', 'params': {'encoding': 'text'}},
     {'key': '60s_image', 'name': '60s新闻图', 'desc': '每日新闻长图', 'regex': '^(60s图|新闻图)$', 'path': '/v2/60s', 'params': {}, 'response_type': 'json', 'reply_type': 'image', 'message_template': '{data.image}'},
     {'key': 'bing', 'name': '必应每日壁纸', 'desc': 'Bing 每日壁纸大图', 'regex': '^(必应壁纸|bing壁纸)$', 'path': '/v2/bing', 'params': {}, 'response_type': 'json', 'reply_type': 'image', 'message_template': '{data.cover}'},
     {'key': 'hitokoto', 'name': '一言', 'desc': '随机一句话文案', 'regex': '^一言$', 'path': '/v2/hitokoto', 'params': {'encoding': 'text'}},
@@ -157,12 +157,12 @@ _SIXTY_PRESETS = [
     {'key': 'epic', 'name': 'Epic免费游戏', 'desc': 'Epic 喜加一信息', 'regex': '^(epic|喜加一)$', 'path': '/v2/epic', 'params': {'encoding': 'text'}},
     {'key': 'lunar', 'name': '农历信息', 'desc': '今日农历/宜忌', 'regex': '^(农历|黄历)$', 'path': '/v2/lunar', 'params': {'encoding': 'text'}},
     {'key': 'exchange_rate', 'name': '汇率查询', 'desc': '汇率 币种 (如: 汇率 USD, 默认CNY)', 'regex': '^汇率\\s*([A-Za-z]*)$', 'path': '/v2/exchange-rate', 'params': {'encoding': 'text', 'currency': '{$1}'}},
-    {'key': 'weather', 'name': '实时天气', 'desc': '天气 城市名', 'regex': '^天气\\s+(.+)$', 'path': '/v2/weather', 'params': {'encoding': 'text', 'query': '{$1}'}},
-    {'key': 'weather_forecast', 'name': '天气预报', 'desc': '天气预报 城市名 (未来7天)', 'regex': '^天气预报\\s+(.+)$', 'path': '/v2/weather/forecast', 'params': {'encoding': 'text', 'query': '{$1}'}},
-    {'key': 'fanyi', 'name': '翻译', 'desc': '翻译 内容 (自动识别语言)', 'regex': '^翻译\\s+(.+)$', 'path': '/v2/fanyi', 'params': {'encoding': 'text', 'text': '{$1}'}},
-    {'key': 'baike', 'name': '百科查询', 'desc': '百科 词条名', 'regex': '^百科\\s+(.+)$', 'path': '/v2/baike', 'params': {'encoding': 'text', 'word': '{$1}'}},
-    {'key': 'ip', 'name': 'IP查询', 'desc': 'ip查询 IP地址', 'regex': '^ip查询\\s+(.+)$', 'path': '/v2/ip', 'params': {'encoding': 'text', 'ip': '{$1}'}},
-    {'key': 'whois', 'name': 'Whois查询', 'desc': 'whois 域名', 'regex': '^whois\\s+(.+)$', 'path': '/v2/whois', 'params': {'encoding': 'text', 'domain': '{$1}'}},
+    {'key': 'weather', 'name': '实时天气', 'desc': '天气 城市名', 'regex': '^天气(?!预报)\\s*(.+)$', 'path': '/v2/weather', 'params': {'encoding': 'text', 'query': '{$1}'}},
+    {'key': 'weather_forecast', 'name': '天气预报', 'desc': '天气预报 城市名 (未来7天)', 'regex': '^天气预报\\s*(.+)$', 'path': '/v2/weather/forecast', 'params': {'encoding': 'text', 'query': '{$1}'}},
+    {'key': 'fanyi', 'name': '翻译', 'desc': '翻译 内容 (自动识别语言)', 'regex': '^翻译\\s*(.+)$', 'path': '/v2/fanyi', 'params': {'encoding': 'text', 'text': '{$1}'}},
+    {'key': 'baike', 'name': '百科查询', 'desc': '百科 词条名', 'regex': '^百科\\s*(.+)$', 'path': '/v2/baike', 'params': {'encoding': 'text', 'word': '{$1}'}},
+    {'key': 'ip', 'name': 'IP查询', 'desc': 'ip查询 IP地址', 'regex': '^ip查询\\s*(.+)$', 'path': '/v2/ip', 'params': {'encoding': 'text', 'ip': '{$1}'}},
+    {'key': 'whois', 'name': 'Whois查询', 'desc': 'whois 域名', 'regex': '^whois\\s*(.+)$', 'path': '/v2/whois', 'params': {'encoding': 'text', 'domain': '{$1}'}},
 ]
 
 

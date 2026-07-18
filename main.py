@@ -112,13 +112,14 @@ def _save_config(config):
 
 
 async def _reload_self():
-    """配置变更后热重载本插件, 以便按新配置重新注册 @handler。"""
+    """配置变更后热重载本插件, 以便按新配置重新注册 @handler。
+    框架按插件目录名重载, 目录名可能不是 custom_api, 故取本文件所在目录名。"""
     try:
         from core.application import get_app
 
         app = get_app()
         if app and app.plugin_manager:
-            await app.plugin_manager.reload('custom_api')
+            await app.plugin_manager.reload(os.path.basename(_PLUGIN_DIR))
     except Exception as e:
         log.warning(f'热重载失败: {e}')
 

@@ -506,8 +506,38 @@ def _normalize_group_ids(api):
     return result
 
 
+def _allowed_bot_appids():
+    """读取框架「插件选择机器人」绑定, 返回本插件允许的 appid 集合; None 表示不限制。
+
+    框架的绑定只作用于 handler, 主动消息需自行检查。键为 插件名 或 插件名/文件名。"""
+    try:
+        from core.bot.manager import _bot_manager_ref
+
+        pm = getattr(_bot_manager_ref, '_plugin_manager', None) or getattr(_bot_manager_ref, 'plugin_manager', None)
+        if not pm or not hasattr(pm, 'get_plugin_bots'):
+            return None
+        pb = pm.get_plugin_bots()
+        if not pb:
+            return None
+        parts = (__name__ or '').split('.')
+        plugin = parts[1] if len(parts) >= 2 else ''
+        fname = parts[2] if len(parts) >= 3 else ''
+        keys = []
+        if plugin and fname:
+            keys.append(f'{plugin}/{fname}')
+        if plugin:
+            keys.append(plugin)
+        for key in keys:
+            bots = pb.get(key)
+            if bots is not None:
+                return frozenset(str(b) for b in bots) if bots else None
+        return None
+    except Exception:
+        return None
+
+
 def _get_sender(appid=''):
-    """从 BotManager 获取一个 sender (用于主动消息)。"""
+    """从 BotManager 获取一个 sender (用于主动消息), 未指定 appid 时优先用绑定的机器人。"""
     try:
         from core.bot.manager import _bot_manager_ref
 
@@ -519,6 +549,11 @@ def _get_sender(appid=''):
         appid = (appid or '').strip()
         if appid and appid in bots:
             return bots[appid].sender
+        ab = _allowed_bot_appids()
+        if ab:
+            for aid in ab:
+                if aid in bots:
+                    return bots[aid].sender
         return next(iter(bots.values())).sender
     except Exception as e:
         log.warning(f'获取 sender 失败: {e}')
